@@ -3,7 +3,7 @@ ls()
 
 setwd("e:/Genetics/1397 research materials/Codes for GitHub")
 getwd()
-source("e:/Genetics/1397 research materials/Codes for GitHub/1912.R")
+source("e:/Genetics/1397 research materials/Codes for GitHub/1. The whole program.R")
 
 Output <- Valpop (totqtl = 20 ,
                chrn = 2 ,
