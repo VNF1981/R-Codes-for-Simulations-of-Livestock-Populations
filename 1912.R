@@ -1,0 +1,1619 @@
+##########################################################################################################
+################################################# Base Pop ###############################################
+Basepop <- function(totqtl = 500 ,
+                    chrn = 5 ,
+                    lenchr = 1.5 ,
+                    totsnp = 15000 ,
+                    Basenum = 100 ,
+                    G = 50)
+{
+  
+  ##################################   Definition of the map parameters
+  lenchrCM <- lenchr*100
+  GenomeL <- lenchrCM * chrn
+  snpchr <- totsnp/chrn 
+  snpchr <- floor(snpchr)
+  qtlnum <- totqtl / chrn
+  qtlnum <- floor(qtlnum)
+  Dsnp <- snpchr/lenchrCM    # Number of SNPs per each cM
+  Stp <- 1/Dsnp              # distances between snps
+  Stp <- round(Stp,2)
+  StpinMorgan <- Stp/100     # Distance between SNPs per each Morgan (Indicates the probability of CO)  
+  ################################# Assigning QTL's
+  qtl.ids <- seq (from = 1 , to = totsnp , by = (totsnp/totqtl))
+  ################################# Assigning additive effects to the QTL's
+  eff.add <- rnorm(length(qtl.ids),0,1)  
+  ################################# Simulation of the founder population
+  pop <- matrix(0,(Basenum * 2),totsnp)
+  for (i in 1:nrow(pop))
+  {
+    for(j in 1:ncol(pop))
+    {
+      x <- runif(1,min = 0, max = 1) 
+      if(x>=0.5){pop[i,j] <- 1} else{pop[i,j] <- 0}
+    }
+  } 
+  
+  random.mate.pop.temp <- matrix(0,Basenum*2,totsnp)
+  LDs <- as.numeric()
+  random.mate.pop <- pop
+  SireNum<-Basenum/2
+  for(generation in 1 : G) ## loop over generations
+  {
+    for(indiv in 1 : Basenum) ## loop over individuals
+    {
+      gameteIndex1<- (indiv-1)*2+1
+      gameteIndex2<-gameteIndex1+1
+      ## gamete 1 from Sire
+      Sire<-sample( 1:SireNum,1) 
+      SireGamet1<-(Sire-1)*2+1   
+      SireGamet2<-SireGamet1+1   
+      random.mate.pop.temp[gameteIndex1,] <- Recombin(random.mate.pop[SireGamet1,],
+                                                      random.mate.pop[SireGamet2,],
+                                                      chrn,
+                                                      totsnp,
+                                                      StpinMorgan)
+      ## gamete 2 From Dam
+      Dams<-sample((SireNum+1): Basenum,1) 
+      DamsGamet1<-(Dams-1)*2+1
+      DamsGamet2<-DamsGamet1+1
+      random.mate.pop.temp[gameteIndex2,] <- Recombin(random.mate.pop[DamsGamet1,],
+                                                      random.mate.pop[DamsGamet2,],
+                                                      chrn,
+                                                      totsnp,
+                                                      StpinMorgan)
+      
+    } ## End of Basenum loop
+    random.mate.pop <- random.mate.pop.temp
+    #cat("LD",LDs[g],"\n")
+  } ## End of generation loop
+  
+  LDs <- LDCalculator(chrn,snpchr,random.mate.pop,Basenum)
+  
+  BaseOut<- list (random.mate.pop=random.mate.pop, LDs=LDs, eff.add=eff.add, qtl.ids=qtl.ids, 
+                  StpinMorgan=StpinMorgan)
+  return(BaseOut)
+}  
+##########################################################################################################
+#################################################### LD Calculator #######################################
+LDCalculator <- function(chrn,snpchr,random.mate.pop,Basenum)
+{
+  totsnp <- chrn*snpchr
+  ldsVector <- as.numeric()
+  for ( i in 1:(totsnp-1))
+  {
+    Sum=0
+    for ( j in 1:(Basenum*2))
+    {
+      if((random.mate.pop[j,i] + random.mate.pop[j,i+1])==2){(Sum = Sum+1)}
+    }
+    FreqAB = Sum/(Basenum*2)
+    Sumofc <- colSums(random.mate.pop)
+    FreqA = Sumofc[i]/(Basenum*2)
+    FreqB = Sumofc[i+1]/(Basenum*2)
+    d = FreqAB - (FreqA)*(FreqB)
+    r2 = d^2 / (FreqA * FreqB * (1-FreqA) * (1-FreqB))
+    ldsVector[i]<-r2
+  }
+  LD <- mean(ldsVector , na.rm=TRUE)
+  return(LD)
+}
+##########################################################################################################
+#################################################### Recombination #######################################
+Recombin <- function(hap1,hap2,chrn,totsnp,StpinMorgan)
+{
+  snpchr <- totsnp/chrn 
+  recnum <- snpchr-1                                        
+  matdat <- rbind(hap1,hap2) 
+  recombinedhaps <- array(0,c(2,snpchr,chrn))
+  for(i in 1:chrn)
+  {
+    firstind <- ((i-1)*snpchr)+1
+    secondind <- i*snpchr
+    tempmat <- matdat[,firstind:secondind]                
+    for(j in 1:recnum)
+    {
+      x <- runif(1, min=0, max=1)
+      if(x <= StpinMorgan){x1 <- tempmat[1,(j+1):snpchr]
+      x2 <- tempmat[2,(j+1):snpchr]
+      tempmat[1,(j+1):snpchr] <- x2
+      tempmat[2,(j+1):snpchr] <- x1} 
+    } # End of j loop
+    recombinedhaps[,,i] <- tempmat 
+  } # End of i loop
+  matdat <- matrix(rbind(recombinedhaps),2,totsnp)
+  recombinedhap1 <- matdat[1,]
+  recombinedhap2 <- matdat[2,]
+  gamete <- matrix(0,1,totsnp)
+  x <- runif(1,min=0,max=1)
+  if(x<0.25){gamete <- hap1}
+  if(x>0.75){gamete <- hap2}
+  if(x >= 0.25 && x <=0.5){gamete <- recombinedhap1}
+  if(x > 0.5 && x <=0.75){gamete <- recombinedhap2}
+  return(gamete)
+}# End of function
+##########################################################################################################
+############################################# Refrence pop ###############################################
+Refpop <- function (totqtl = 500 ,
+                    chrn = 5 ,
+                    lenchr = 1.5 ,
+                    totsnp = 15000 ,
+                    Basenum = 100 ,
+                    G = 50 ,
+                    Hgen = 3 ,
+                    nRef = 4000 ,
+                    h2 = 0.1)
+  
+{
+  Basepop <- Basepop(totqtl , chrn , lenchr , totsnp , Basenum , G)             
+  pop <- Basepop$random.mate.pop
+  LDs <- Basepop$LDs
+  eff.add <- Basepop$eff.add
+  qtl.ids <- Basepop$qtl.ids
+  StpinMorgan <- Basepop$StpinMorgan
+  
+  snpchr <- totsnp/chrn
+  snpchr <- floor(snpchr)
+  qtlnum <- totqtl / chrn
+  qtlnum <- floor(qtlnum)
+  
+  Refpop.temp <- matrix(0,nRef*2,totsnp)
+  
+  Refped <- array(0,c(nRef,3,Hgen))
+  colnames(Refped) <- c("ID","Sire","Dam")
+  Refped[,"ID",1] <- (1:nRef)
+  
+  AMatRef <- array(0,c(nRef,9,Hgen))                                            
+  colnames(AMatRef) <- c("ID","Sire","Dam","sex","genotype","phen","g.value","EBV","inbreeding") 
+  
+  accmatRef <- matrix(0,Hgen,9)                                                          
+  colnames(accmatRef) <- c("CBLUP","c1","ss1","c2","ss2","c5","ss5","c5e","ss5e")
+  
+  InbmatRef <- matrix(0,Hgen,10)
+  colnames(InbmatRef) <- c("Ac","Gc","A1","G1","A2","G2","A5","G5","A5e","G5e")
+  
+  # ********************************************************
+  #     Expanding to simulate the recent populations                                         
+  # ********************************************************  
+  
+  for(generation in 1:Hgen)
+     {                      
+      if(generation==1){Refpop <- pop}                                  
+      else if(generation>1){Refpop <- Refpop.temp}              
+      N <- nrow(Refpop)/2
+      Sires <- seq(1,N,by=2)
+      Dams <- seq(2,N,by=2)
+      Sirevec <- sample(Sires,nRef,replace=TRUE)
+      Damvec <- sample(Dams,nRef,replace=TRUE)             
+    
+      for (indiv in 1 : nRef)
+          {    
+            gameteIndex1 <- (indiv-1)*2+1
+            gameteIndex2 <- gameteIndex1+1
+            
+            ## Sires gamete
+            SireGamet1 <-(Sirevec[indiv]-1)*2+1   
+            SireGamet2 <- SireGamet1+1            
+            Refpop.temp[gameteIndex1,] <- Recombin(Refpop[SireGamet1,],
+                                                   Refpop[SireGamet2,],
+                                                   chrn,
+                                                   totsnp,
+                                                   StpinMorgan)
+            
+            ## Dams gamete
+            DamsGamet1 <-(Damvec[indiv]-1)*2+1     
+            DamsGamet2 <- DamsGamet1+1            
+            Refpop.temp[gameteIndex2, ] <- Recombin(Refpop[DamsGamet1,],
+                                                    Refpop[DamsGamet2,],
+                                                    chrn,
+                                                    totsnp,
+                                                    StpinMorgan)
+            
+            if(generation>1){Refped[indiv,"Sire",generation] <- (Sirevec[indiv] + ((generation-2)*nRef)) 
+            Refped[indiv,"Dam",generation] <- (Damvec[indiv] + ((generation-2)*nRef))}                     
+          }# End for all animals
+  
+        Refpop <- Refpop.temp                               
+        Refped[,"ID",generation] <- ((((generation-1)*nRef)+1):(generation*nRef))
+        
+        AMatRef[,"ID",generation] <- Refped[,"ID",generation]                         
+        AMatRef[,"Sire",generation] <- Refped[,"Sire",generation]
+        AMatRef[,"Dam",generation] <- Refped[,"Dam",generation]
+        AMatRef[,"sex",generation] <- rep(1:2,times=nRef/2)  
+  
+    # Zu                         
+        Zu <- matrix(0,nRef,totsnp)                                      
+        for(i in 1:nRef){I1 <- (i-1)*2+1
+        I2 <- I1+1
+        Zu[i,] <- Refpop[I1,] + Refpop[I2,]}
+    # TBV
+        Zqtl <-  matrix(0,nRef,totqtl)
+        for(i in 1:nRef)
+        {
+          for(j in 1:totqtl)
+          {
+            if(Zu[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+            else if(Zu[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+          }
+        }
+        g.value <- apply (Zqtl,1,function(x) sum(x*eff.add))
+        g.value <- round(g.value,2)
+        AMatRef[,"g.value",generation] <- g.value
+    # Genotypic, phenotypic, and error Variance
+        vg <- var(g.value)
+        vp <- vg/h2
+        ve <- vp-vg
+        ve <- round(ve,2)
+        y <- g.value + rnorm(length(g.value),0,sqrt(ve))
+        y <- round(y,2)                                                       
+        AMatRef[,"phen",generation] <- y      
+        Sire <- c(Refped[,"Sire",1:generation])
+        Dam <-  c(Refped[,"Dam",1:generation])
+        A <- ACreator(Sire,Dam)               
+        alpha <- (1-h2)/h2
+        alpha <- round(alpha)                         
+        alpha <- drop(alpha)
+        Z <- matrix(0,nRef*generation,nRef*generation)
+        diag(Z) <- 1
+    #EBV    
+        ytot <- matrix(AMatRef[,"phen",(1:generation)])  
+        EBV <- BLUP(Z,A,ytot,alpha)
+        EBV <- round(EBV,4) 
+        indexcurrent <- (((generation-1)*nRef)+1):(generation*nRef)
+        AMatRef[,"EBV",generation] <- EBV[indexcurrent]
+   
+    # Percent of heterozygosity                          
+        for(i in 1:nRef)
+           {Sum=0
+              for(j in 1:ncol(Zu))
+                  {
+                    if(Zu[i,j]!=1){Sum <- Sum+1}
+                  }
+            AMatRef[i,"inbreeding",generation] <- ((Sum/ncol(Zu))/0.5)
+            }    
+        
+    # Accuracies  
+        accmatRef[generation,] <- cor(AMatRef[,"EBV",generation],AMatRef[,"g.value",generation])                    
+    # Inbreeding    
+        InbmatRef[generation,"Ac"] <- mean(diag(A[indexcurrent,indexcurrent])) 
+        InbmatRef[generation,"A1"] <- mean(diag(A[indexcurrent,indexcurrent]))
+        InbmatRef[generation,"A2"] <- mean(diag(A[indexcurrent,indexcurrent]))
+        InbmatRef[generation,"A5"] <- mean(diag(A[indexcurrent,indexcurrent])) 
+        InbmatRef[generation,"A5e"] <- mean(diag(A[indexcurrent,indexcurrent]))          
+        InbmatRef[generation,"Gc"] <- mean(AMatRef[,"inbreeding",generation])              
+        InbmatRef[generation,"G1"] <- mean(AMatRef[,"inbreeding",generation]) 
+        InbmatRef[generation,"G2"] <- mean(AMatRef[,"inbreeding",generation]) 
+        InbmatRef[generation,"G5"] <- mean(AMatRef[,"inbreeding",generation]) 
+        InbmatRef[generation,"G5e"] <- mean(AMatRef[,"inbreeding",generation])    
+        
+        #LDs[generation+G] <- LDCalculator(chrn,snpchr,Refpop,nRef)
+        cat("RecentGenerations:", generation , "\n") 
+        
+  } # End for Hgens
+  
+  Arel <- A[(((Hgen-1)*nRef)+1):(Hgen*nRef),(((Hgen-1)*nRef)+1):(Hgen*nRef)]         
+  
+  accmatRef <- round(accmatRef,2)
+  InbmatRef <- round(InbmatRef,2)         
+  
+  refout <- list(Refpop=Refpop , LDs=LDs , eff.add=eff.add , qtl.ids=qtl.ids , 
+                 AMatRef=AMatRef , accmatRef=accmatRef , InbmatRef=InbmatRef , 
+                 Refped=Refped , Zu=Zu , Arel=Arel, StpinMorgan=StpinMorgan) 
+  
+  return(refout)
+}# End of function
+###############################################################################################################
+################################################# Valid Pop ###################################################
+Valpop <- function (totqtl = 500 ,
+                    chrn = 5 ,
+                    lenchr = 1.5 ,
+                    totsnp = 15000 ,
+                    Basenum = 100 ,
+                    G = 50 ,
+                    Hgen = 3 ,
+                    nRef = 4000 ,
+                    h2 = 0.1 ,
+                    Valgen = 7 ,
+                    malesintensity = 0.02 ,
+                    femalesintensity = 0.2,
+                    Mating.Method = "Mate.Allocation")
+{
+  Refrencepop <- Refpop(totqtl , chrn , lenchr , totsnp , Basenum , G , Hgen , nRef , h2)           
+  Refpop <- Refrencepop$Refpop
+  LDs <- Refrencepop$LDs
+  eff.add <- Refrencepop$eff.add
+  qtl.ids <- Refrencepop$qtl.ids
+  AMatRef <- Refrencepop$AMatRef                                            
+  accmatRef <- Refrencepop$accmatRef
+  InbmatRef <- Refrencepop$InbmatRef
+  ArelRef <- Refrencepop$Arel
+  Refped <- Refrencepop$Refped
+  ZuRef <-  Refrencepop$Zu
+  StpinMorgan <- Refrencepop$StpinMorgan
+
+  snpchr <- totsnp/chrn
+  snpchr <- floor(snpchr)
+  qtlnum <- totqtl / chrn
+  qtlnum <- floor(qtlnum)  
+
+  totgen <- Valgen+Hgen
+  
+  PGT1 = 0.1                                              # Percents of genotyped individuals
+  PGT2 = 0.2 
+  PGT3 = 0.5
+  
+  Tarpop <- array(0,c(nRef*2,totsnp,totgen,5))                                  
+  Tarpop[,,Hgen,] <- Refpop
+  
+  pedigree <- array(0,c(nRef,3,totgen,5))                                       
+  colnames(pedigree) <- c("ID","Sire","Dam")
+  pedigree[,,1:Hgen,] <- Refped
+  
+  AMat <- array(0,c(nRef,9,totgen,5))                                           
+  colnames(AMat) <- c("ID","Sire","Dam","sex","genotype","phen","g.value","EBV","inbreeding")
+  AMat[,,(1:Hgen),] <- AMatRef[,,]
+  
+  Arel <- array(0,c(nRef,nRef,totgen))                                        
+  Arel[,,Hgen] <- ArelRef 
+  Hrel <- array(0,c(nRef,nRef,totgen,4))                                      
+  Hrel[,,Hgen,] <- ArelRef
+  
+  # 1                
+      GM.1 <- seq(1,nRef,(nRef/(PGT1*(nRef/2))))
+      GF.1 <- seq(2,nRef,(nRef/(PGT1*(nRef/2))))                                                                  
+      GA.1 <- c(GM.1,GF.1)
+      GA.1 <- sort(GA.1)
+      AMat[GA.1,"genotype",(Hgen:totgen),2] <- 1
+  # 2                          
+      GM.2 <- seq(1,nRef,(nRef/(PGT2*(nRef/2))))
+      GF.2 <- seq(2,nRef,(nRef/(PGT2*(nRef/2))))                                                                  
+      GA.2 <- c(GM.2,GF.2)
+      GA.2 <- sort(GA.2)
+      AMat[GA.2,"genotype",(Hgen:totgen),3] <- 1
+  # 3                          
+      GM.3 <- seq(1,nRef,(nRef/(PGT3*(nRef/2))))
+      GF.3 <- seq(2,nRef,(nRef/(PGT3*(nRef/2))))                                                                  
+      GA.3 <- c(GM.3,GF.3)
+      GA.3 <- sort(GA.3)
+      AMat[GA.3,"genotype",(Hgen:totgen),4] <- 1
+  # 3 early     
+      AMat[GA.3,"genotype",(Hgen:totgen),5] <- 1   
+  
+  # GA Vector 
+      GAvec <- c(GM.1,GM.2,GM.3,GM.3)           
+
+  # Array of marker information     
+      Zuhtot <- array(0,c(nRef,totsnp,totgen,4))        
+      Zuhtot[,,Hgen,] <- ZuRef
+      
+  # Lists of relationship matrices for genotyped and ungenotyped individuals    
+      A22rel.1 <- list()
+      G22rel.1 <- list()  
+      A22rel.2 <- list()
+      G22rel.2 <- list()  
+      A22rel.3 <- list()
+      G22rel.3 <- list()
+      A22rel.4 <- list()
+      G22rel.4 <- list() 
+  
+      geneticimp <- matrix(0,totgen,5)
+      colnames(geneticimp) <- c("classic","ss1","ss2","ss5","ss5e")
+      geneticimp[Hgen,] <- mean(AMat[,"g.value",Hgen,1])                            
+      
+      Inbmat <- matrix(0,totgen,10)                                                 
+      colnames(Inbmat) <- c("Ac","Gc","A1","G1","A2","G2","A5","G5","A5e","G5e")
+      Inbmat[1:Hgen,] <- InbmatRef 
+      
+      accmat <- matrix(0,totgen,9)                                                  
+      colnames(accmat) <- c("CBLUP","c1","ss1","c2","ss2","c5","ss5","c5e","ss5e")
+      accmat[1:Hgen,] <- accmatRef[1:Hgen,]
+      
+      accmatcomp <- array(0,c(totgen,4,4))
+      colnames(accmatcomp) <- c("clasgen","clasungen","ssgen","ssungen")
+      
+      Genetic.Variance <- matrix(0,totgen,5)
+      colnames(Genetic.Variance) <- c("CBLUP","ss1","ss2","ss5","ss5e") 
+
+#*******************************************************************
+#***************** Simulation of validation populations 
+#*******************************************************************    
+      for (g in (Hgen+1) : totgen)
+            {
+              # useful indices
+                        gentemp <- g-1 
+                        gendex <- g-(Hgen-1)
+                        gval <- g-Hgen
+                  
+              # Genders                 
+                        AMat[,"sex",g,] <- rep(1:2,times=nRef/2)
+                  
+              # selection for cblup
+                  ## making matrix for selected females 
+                        AMatfc <- subset(AMat[,,gentemp,1], AMat[,"sex",gentemp,1]==2)
+                        sortAmatfc <- sort(AMatfc[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatfc <- matrix(0,nRef/2,2)
+                        datamatfc[,1] <- (sortAmatfc$ix)*2                       # real index at AMat
+                        datamatfc[,2] <- sortAmatfc$x
+                  
+                  ## making matrix for selected males
+                        AMatmc <- subset(AMat[,,gentemp,1], AMat[,"sex",gentemp,1]<2)
+                        sortAmatmc <- sort(AMatmc[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatmc <- matrix(0,nRef/2,2)
+                        datamatmc[,1] <- ((sortAmatmc$ix)*2)-1                   # real index at AMat
+                        datamatmc[,2] <- sortAmatmc$x 
+                  
+                        ppc <- (malesintensity*(nRef/2))
+                        ddc <- (femalesintensity*(nRef/2))
+                        selectedmalesc <- datamatmc[(1:ppc),]                     
+                        selectedfemalesc <- datamatfc[(1:ddc),]                         
+                  
+              # Mating   
+                  # Mate Allocation
+                        if(Mating.Method=="Mate.Allocation")
+                          {
+                           resc <- mateselN(selectedmalesc,selectedfemalesc,totsnp,g,Tarpop[,,gentemp,1],
+                                            nRef, Arel[,,gentemp], chrn,StpinMorgan)
+                           Tarpop[,,g,1] <- resc$valpop
+                           pedigree[,,g,1] <- resc$ped
+                           }
+                  # Random Mating
+                        if(Mating.Method=="Random.Mating")
+                           {
+                            resc <- RandommatN(selectedmalesc,selectedfemalesc,totsnp,g,Tarpop[,,gentemp,1],
+                                               nRef,chrn,StpinMorgan)
+                            Tarpop[,,g,1] <- resc$valpop
+                            pedigree[,,g,1] <- resc$ped
+                           }
+              # Selection for ssBLUP                  
+################ 1                            
+                  ## making matrix for selected females 
+                        AMatf.1 <- subset(AMat[,,gentemp,2], AMat[,"sex",gentemp,2]==2)
+                        sortAmatf.1 <- sort(AMatf.1[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatf.1 <- matrix(0,nRef/2,2)
+                        datamatf.1[,1] <- (sortAmatf.1$ix)*2                       # real index at AMat
+                        datamatf.1[,2] <- sortAmatf.1$x
+                        
+                  ## making matrix for selected males
+                        AMatm.1 <- subset(AMat[,,gentemp,2], AMat[,"sex",gentemp,2]<2)
+                        sortAmatm.1 <- sort(AMatm.1[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatm.1 <- matrix(0,nRef/2,2)
+                        datamatm.1[,1] <- ((sortAmatm.1$ix)*2)-1                   # real index at AMat
+                        datamatm.1[,2] <- sortAmatm.1$x                         
+                        
+                        pp.1 <- (malesintensity*(nRef/2))
+                        dd.1 <- (femalesintensity*(nRef/2))
+                        selectedmalesh.1 <- datamatm.1[(1:pp.1),]                     
+                        selectedfemalesh.1 <- datamatf.1[(1:dd.1),]                         
+                        
+                  # Mating 
+                    # Mate Allocation
+                        if(Mating.Method=="Mate.Allocation")
+                        {
+                        resh.1 <- mateselN(selectedmalesh.1,selectedfemalesh.1,totsnp,g,Tarpop[,,gentemp,2],
+                                           nRef,Hrel[,,gentemp,1],chrn,StpinMorgan)
+                        Tarpop[,,g,2] <- resh.1$valpop
+                        pedigree[,,g,2] <- resh.1$ped  
+                        }
+                    # Random Mating     
+                        if(Mating.Method=="Random.Mating")
+                        {
+                        resh.1 <- RandommatN(selectedmalesh.1,selectedfemalesh.1,totsnp,g,Tarpop[,,gentemp,2],
+                                             nRef,chrn,StpinMorgan)
+                        Tarpop[,,g,2] <- resh.1$valpop
+                        pedigree[,,g,2] <- resh.1$ped
+                        }
+################ 2                            
+                  ## making matrix for selected females 
+                        AMatf.2 <- subset(AMat[,,gentemp,3], AMat[,"sex",gentemp,3]==2)
+                        sortAmatf.2 <- sort(AMatf.2[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatf.2 <- matrix(0,nRef/2,2)
+                        datamatf.2[,1] <- (sortAmatf.2$ix)*2                       # real index at AMat
+                        datamatf.2[,2] <- sortAmatf.2$x
+                        
+                  ## making matrix for selected males
+                        AMatm.2 <- subset(AMat[,,gentemp,3], AMat[,"sex",gentemp,3]<2)
+                        sortAmatm.2 <- sort(AMatm.2[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatm.2 <- matrix(0,nRef/2,2)
+                        datamatm.2[,1] <- ((sortAmatm.2$ix)*2)-1                   # real index at AMat
+                        datamatm.2[,2] <- sortAmatm.2$x                         
+                        
+                        pp.2 <- (malesintensity*(nRef/2))
+                        dd.2 <- (femalesintensity*(nRef/2))
+                        selectedmalesh.2 <- datamatm.2[(1:pp.2),]                     
+                        selectedfemalesh.2 <- datamatf.2[(1:dd.2),]                         
+                        
+                  # Mating 
+                     # Mate Allocation
+                        if(Mating.Method=="Mate.Allocation")
+                        {
+                        resh.2 <- mateselN(selectedmalesh.2,selectedfemalesh.2,totsnp,g,Tarpop[,,gentemp,3],
+                                           nRef,Hrel[,,gentemp,2],chrn,StpinMorgan)
+                        Tarpop[,,g,3] <- resh.2$valpop
+                        pedigree[,,g,3] <- resh.2$ped  
+                        }
+                    # Random Mating    
+                        if(Mating.Method=="Random.Mating")
+                        {
+                        resh.2 <- RandommatN(selectedmalesh.2,selectedfemalesh.2,totsnp,g,Tarpop[,,gentemp,3],
+                                             nRef,chrn,StpinMorgan)
+                        Tarpop[,,g,3] <- resh.2$valpop
+                        pedigree[,,g,3] <- resh.2$ped
+                        }
+################ 3                            
+                  ## making matrix for selected females 
+                        AMatf.3 <- subset(AMat[,,gentemp,4], AMat[,"sex",gentemp,4]==2)
+                        sortAmatf.3 <- sort(AMatf.3[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatf.3 <- matrix(0,nRef/2,2)
+                        datamatf.3[,1] <- (sortAmatf.3$ix)*2                       # real index at AMat
+                        datamatf.3[,2] <- sortAmatf.3$x
+                        
+                  ## making matrix for selected males
+                        AMatm.3 <- subset(AMat[,,gentemp,4], AMat[,"sex",gentemp,4]<2)
+                        sortAmatm.3 <- sort(AMatm.3[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatm.3 <- matrix(0,nRef/2,2)
+                        datamatm.3[,1] <- ((sortAmatm.3$ix)*2)-1                   # real index at AMat
+                        datamatm.3[,2] <- sortAmatm.3$x                         
+                        
+                        pp.3 <- (malesintensity*(nRef/2))
+                        dd.3 <- (femalesintensity*(nRef/2))
+                        selectedmalesh.3 <- datamatm.3[(1:pp.3),]                     
+                        selectedfemalesh.3 <- datamatf.3[(1:dd.3),]                         
+                        
+                  # Mating
+                    # Mate Allocation 
+                        if(Mating.Method=="Mate.Allocation")
+                        {
+                        resh.3 <- mateselN(selectedmalesh.3,selectedfemalesh.3,totsnp,g,Tarpop[,,gentemp,4],
+                                           nRef,Hrel[,,gentemp,3],chrn,StpinMorgan)
+                        Tarpop[,,g,4] <- resh.3$valpop
+                        pedigree[,,g,4] <- resh.3$ped  
+                        }
+                    # Random Mating    
+                        if(Mating.Method=="Random.Mating")
+                        {
+                        resh.3 <- RandommatN(selectedmalesh.3,selectedfemalesh.3,totsnp,g,Tarpop[,,gentemp,4],
+                                             nRef,chrn,StpinMorgan)
+                        Tarpop[,,g,4] <- resh.3$valpop
+                        pedigree[,,g,4] <- resh.3$ped
+                        }
+################ 3 early                           
+                  ## making matrix for selected females 
+                        AMatf.4 <- subset(AMat[,,gentemp,5], AMat[,"sex",gentemp,5]==2)
+                        sortAmatf.4 <- sort(AMatf.4[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatf.4 <- matrix(0,nRef/2,2)
+                        datamatf.4[,1] <- (sortAmatf.4$ix)*2                       # real index at AMat
+                        datamatf.4[,2] <- sortAmatf.4$x
+                        
+                  ## making matrix for selected males
+                        AMatm.4 <- subset(AMat[,,gentemp,5], AMat[,"sex",gentemp,5]<2)
+                        sortAmatm.4 <- sort(AMatm.4[,"EBV"],decreasing=TRUE,index.return=TRUE)
+                        datamatm.4 <- matrix(0,nRef/2,2)
+                        datamatm.4[,1] <- ((sortAmatm.4$ix)*2)-1                   # real index at AMat
+                        datamatm.4[,2] <- sortAmatm.4$x                         
+                        
+                        pp.4 <- (malesintensity*(nRef/2))
+                        dd.4 <- (femalesintensity*(nRef/2))
+                        selectedmalesh.4 <- datamatm.4[(1:pp.4),]                     
+                        selectedfemalesh.4 <- datamatf.4[(1:dd.4),]                         
+                        
+                  # Mating 
+                    # Mate Allocation
+                        if(Mating.Method=="Mate.Allocation")
+                        {
+                        resh.4 <- mateselN(selectedmalesh.4,selectedfemalesh.4,totsnp,g,Tarpop[,,gentemp,5],
+                                           nRef,Hrel[,,gentemp,4],chrn,StpinMorgan)
+                        Tarpop[,,g,5] <- resh.4$valpop
+                        pedigree[,,g,5] <- resh.4$ped 
+                        }
+                    # Random Mating   
+                        if(Mating.Method=="Random.Mating")
+                        {
+                        resh.4 <- RandommatN(selectedmalesh.4,selectedfemalesh.4,totsnp,g,Tarpop[,,gentemp,5],
+                                             nRef,chrn,StpinMorgan)
+                        Tarpop[,,g,5] <- resh.4$valpop
+                        pedigree[,,g,5] <- resh.4$ped
+                        }
+#**************************************************                  
+                  # CBLUP
+#**************************************************
+# @@@ P1
+                        
+                        AMat[,"ID",g,1] <- pedigree[,"ID",g,1]
+                        AMat[,"Sire",g,1] <- pedigree[,"Sire",g,1]
+                        AMat[,"Dam",g,1] <- pedigree[,"Dam",g,1]
+
+                  # Zuc               
+                        Zuc <- matrix(0,nRef,totsnp)                                      
+                        for(i in 1:nRef)
+                        {
+                          I1 <- (i-1)*2+1
+                          I2 <- I1+1
+                          Zuc[i,] <- Tarpop[I1,,g,1] + Tarpop[I2,,g,1]
+                        }
+                        
+                  # TBV
+                        Zqtl <-  matrix(0,nRef,totqtl)
+                        for(i in 1:nRef)
+                        {
+                          for(j in 1:totqtl)
+                          {
+                            if(Zuc[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+                            else if(Zuc[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+                          }
+                        }                        
+                        g.valuec <- apply (Zqtl,1,function(x) sum(x*eff.add))
+                        g.valuec <- round(g.valuec,2)
+                        AMat[,"g.value",g,1] <- g.valuec
+                        
+                  # Genotypic, phenotypic, and error Variance
+                        vgc <- var(g.valuec)
+                        Genetic.Variance[g,"CBLUP"] <- vgc
+                        vpc <- vgc/h2
+                        vec <- vpc-vgc
+                        vec <- round(vec,2)
+                        yc <- g.valuec + rnorm(length(g.valuec),0,sqrt(vec))
+                        yc <- round(yc,2)                                                       
+                        AMat[,"phen",g,1] <- yc
+                  
+                  # pedigree and A relationship matrix for all generation  
+                        Sirec <- c(pedigree[,"Sire",(1:g),1])
+                        Damc <-  c(pedigree[,"Dam",(1:g),1])
+                        Atc <- ACreator(Sirec,Damc) 
+                        Atc <- round(Atc,4)
+                        indethreegen <- (nRef*(g-Hgen))+1                      
+                        Acrc <- Atc[indethreegen:nrow(Atc),indethreegen:nrow(Atc)] 
+                        indeAc <- (nRef*gentemp)+1                                    
+                        Arel[,,g] <- Atc[indeAc:nrow(Atc) , indeAc:ncol(Atc)] 
+                        
+                  ###### Alpha
+                        #alphac <- vec/vgc
+                        alphac <- (1-h2)/h2
+                        alphac <- round(alphac)                         
+                        alphac <- drop(alphac)                         
+                  
+                  ###### y
+                        ytotc <- matrix((AMat[,"phen",(gendex:g),1]),(nRef*Hgen),1)
+                        
+                  ###### Zc     
+                        Zc <- matrix(0,(nRef*Hgen),(nRef*Hgen))
+                        diag(Zc) <- 1
+                        
+                  ###### EBV    
+                        EBVc <- BLUP(Zc,Acrc,ytotc,alphac)
+                        EBVc <- round(EBVc,4)
+                        AMat[,"EBV",g,1] <- EBVc[((nRef*(Hgen-1))+1):(nRef*Hgen)]      
+
+                  # Percent of heterozygosity 
+                        for(i in 1:nRef)
+                        {
+                          Sum=0
+                          for(j in 1:ncol(Zuc))
+                          {
+                            if(Zuc[i,j]!=1){Sum <- Sum+1}
+                          }
+                          AMat[i,"inbreeding",g,1] <- ((Sum/ncol(Zuc))/0.5)
+                        }
+                  # Accuracy , GI & Inbreding                   
+                        accmat[g,"CBLUP"] <- cor(AMat[,"EBV",g,1],AMat[,"g.value",g,1])
+                        geneticimp[g,"classic"] <- mean(AMat[,"g.value",g,1])                 
+                        indeAc <- (nRef*gentemp)+1                                    
+                        Acurc <- Atc[indeAc:nrow(Atc) , indeAc:ncol(Atc)]
+                        Inbmat[g,"Ac"] <- mean(diag(Acurc))  
+                        Inbmat[g,"Gc"] <- mean(AMat[,"inbreeding",g,1]) 
+
+#**************************************************                  
+    # ssBLUP with 10%, 20%, 50%, and 50% of GA 
+#**************************************************
+# @@@ P2
+                        AMat[,"ID",g,2] <- pedigree[,"ID",g,2]
+                        AMat[,"Sire",g,2] <- pedigree[,"Sire",g,2]
+                        AMat[,"Dam",g,2] <- pedigree[,"Dam",g,2]
+                        Zuh <- matrix(0,nRef,totsnp)                                      
+                        for(i in 1:nRef)
+                            {
+                              I1 <- (i-1)*2+1
+                              I2 <- I1+1
+                              Zuh[i,] <- Tarpop[I1,,g,2] + Tarpop[I2,,g,2]
+                            }
+                        Zuhtot[,,g,1] <- Zuh
+                        Zqtl <-  matrix(0,nRef,totqtl)
+                        for(i in 1:nRef)
+                            {
+                              for(j in 1:totqtl)
+                              {
+                                if(Zuh[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+                                else if(Zuh[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+                              }
+                            }
+                        g.valueh <- apply (Zqtl,1,function(x) sum(x*eff.add))
+                        g.valueh <- round(g.valueh,2)
+                        AMat[,"g.value",g,2] <- g.valueh
+                        
+                  # Genotypic, phenotypic, and error Variance
+                        vgh <- var(g.valueh)
+                        Genetic.Variance[g,"ss1"] <- vgh
+                        vph <- vgh/h2
+                        veh <- vph-vgh
+                        veh <- round(veh,2)
+                        yh <- g.valueh + rnorm(length(g.valueh),0,sqrt(veh)) 
+                        yh <- round(yh,2)              
+                        AMat[,"phen",g,2] <- yh
+                  # pedigree and A relationship matrix for all generations
+                        Sireh <- c(pedigree[,"Sire",(1:g),2])
+                        Damh <-  c(pedigree[,"Dam",(1:g),2])
+                        Ath <- ACreator(Sireh,Damh) 
+                        Ath <- round(Ath,4)
+                        indethreegen <- (nRef*(g-Hgen))+1                      
+                        Acrh <- Ath[indethreegen:nrow(Ath),indethreegen:nrow(Ath)]
+                        indeAh <- (nRef*gentemp)+1                             
+                        #Arel[,,g,2] <- Ath[indeAh:nrow(Ath) , indeAh:ncol(Ath)]
+                        
+                  # Extracting the info of genotyped animals in each generation                                                    
+                        if(g==Hgen+1){GAG1 <- (nRef*(Hgen-1)) + GA.1             
+                        GAG2 <- (nRef*(Hgen-2)) + GA.1
+                        indGAtot <- c(GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}
+                        
+                        if(g>Hgen+1){ GAG1 <- (nRef*(Hgen-1)) + GA.1
+                        GAG2 <- (nRef*(Hgen-2)) + GA.1
+                        GAG3 <- GA.1                                           
+                        indGAtot <- c(GAG3,GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}                          
+                        
+                  # A22 & G22   
+                        A22 <- Acrh[indGAtot,indGAtot]                                                            
+                        A22rel.1[[gval]] <- A22                                                    
+                        if(g==Hgen+1){Zgen <- rbind(Zuhtot[GA.1,,(gentemp),1],Zuhtot[GA.1,,g,1])} 
+                        if(g>Hgen+1) {Zgen <- rbind(Zuhtot[GA.1,,(g-2),1],Zuhtot[GA.1,,gentemp,1],Zuhtot[GA.1,,g,1])}                      
+                        G22 <- GCreator(Zgen)
+                  # A11 & A21 & A12
+                        A12 <- Acrh[indUGAtot,indGAtot]                      
+                        A21 <- Acrh[indGAtot,indUGAtot]  
+                  # Finding G22 & A22 parameters                                              
+                        A22scale <- A22                            
+                        A22.diag <- mean(diag(A22scale))        
+                        diag(A22scale) <- 0                         
+                        PA22 <- apply(A22scale,2,function(x) sum(x)/((length(x)-1)))                         
+                        A22.ofdiag <- mean(PA22)
+                        G22scale <- G22
+                        G22.diag <- mean(diag(G22scale))
+                        diag(G22scale) <- 0
+                        PG22 <- apply(G22scale,2,function(x) sum(x)/((length(x)-1)))
+                        G22.ofdiag <- mean(PG22)
+                        Alphadiag <- A22.diag - G22.diag
+                        Alphaofdiag <- A22.ofdiag - G22.ofdiag 
+                  # H       
+                        Hout <- HCreator(Acrh,A22,G22,A12,A21,Alphadiag,Alphaofdiag,indGAtot,indUGAtot)
+                        H <- Hout$H
+                        indehh <- (nRef*(Hgen-1))+1                            
+                        Hrel[,,g,1] <- H[indehh:nrow(H) , indehh:ncol(H)]        
+                        
+                  # Mix2 & G22 scaled & Gw  
+                        G22t <- (0.95*G22) + (0.05*A22)                        # To avoid singularity                      
+                        G22temp <- G22t
+                        diag(G22temp) <- 0
+                        G22temp <- G22temp+Alphaofdiag
+                        diag(G22temp) <- 0                                     
+                        diag(G22temp) <- diag(G22t)+Alphadiag
+                        G22temp <- round(G22temp,4)
+                        #Mix2 <- (G22temp-A22)
+                        #Mix2 <- G22temp - (0.7*(A22))                         
+                        #Mix2 <- round(Mix2,4)
+                        G22rel.1[[gval]] <- G22temp             
+                  # Alpha
+                        #alphah <- veh/vgh
+                        alphah <- (1-h2)/h2
+                        alphah <- round(alphah)
+                        alphah <- drop(alphah)          
+                  # y
+                        # Animals in last generation don't have any record
+                        #ytothred <- matrix((AMat[,"phen",gendex:gentemp,2]),(nRef*(Hgen-1)),1)                         
+                        # Animals in last generation have records
+                        ytoth <- matrix((AMat[,"phen",(gendex:g),2]),(nRef*Hgen),1) 
+                  # Zh     
+                        # Animals in last generation have record
+                        Zh <- matrix(0,(nRef*Hgen),(nRef*Hgen))                    
+                        diag(Zh) <- 1
+                        # Animals in last generation don't have any record 
+                        #Zhred <- matrix(0,length(ytothred),(nRef*Hgen))
+                        #diag(Zhred) <- 1
+                  # ssBLUP using direct inverse of H           
+                        Adeltatemp <- matrix(0,(nRef*Hgen),(nRef*Hgen))
+                        vah <- (solve(G22rel.1[[gval]])) - (solve(A22rel.1[[(gval)]])) 
+                        Adeltatemp[indGAtot,indGAtot] <- vah
+                        Hinv <- solve(Acrh) + Adeltatemp 
+                        ktemp <- Hinv*alphah
+                        ZZtemp <- crossprod(Zh)
+                        wtemp <- ZZtemp+ktemp
+                        Zytemp <- crossprod(Zh,ytoth)
+                        bhattemp <- solve(wtemp,Zytemp)
+                        bhattemp <- round(bhattemp,4)
+                        AMat[,"EBV",g,2] <- bhattemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]                          
+                        
+                        EBVclas.htemp <- BLUP(Zh,Acrh,ytoth,alphah)
+                        EBVclas.h <- EBVclas.htemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]
+                        EBVclas.h <- round(EBVclas.h,4)
+                  # Percent of heterozygosity            
+                        for(i in 1:nRef)
+                        {
+                          Sum=0
+                          for(j in 1:ncol(Zuh))
+                          {
+                            if(Zuh[i,j]!=1){Sum <- Sum+1}
+                          }
+                          AMat[i,"inbreeding",g,2] <- ((Sum/ncol(Zuh))/0.5)
+                        }                            
+                  # accmat                
+                        # separating accuracy for genotyped and ungenotyped animals in generation 5
+                        if(g>4){genAmat <- subset(AMat[,,g,2], AMat[,"genotype",g,2]==1)
+                        accgen <- cor(genAmat[,"EBV"],genAmat[,"g.value"])                          
+                        ungenAmat <- subset(AMat[,,g,2], AMat[,"genotype",g,2]==0)
+                        accungen <- cor(ungenAmat[,"EBV"],ungenAmat[,"g.value"])                         
+                        EBVclas.cur.h.gen <- EBVclas.h[GA.1]
+                        EBVclas.cur.h.ungen <- EBVclas.h[-GA.1]                         
+                        accmatcomp[g,"clasgen",1] <- cor(EBVclas.cur.h.gen , genAmat[,"g.value"])
+                        accmatcomp[g,"clasungen",1] <- cor(EBVclas.cur.h.ungen , ungenAmat[,"g.value"])                       
+                        accmatcomp[g,"ssgen",1] <- accgen                       
+                        accmatcomp[g,"ssungen",1] <- accungen 
+                        }# End of if
+                  # Accuracy , GI & Inbreding                                 
+                        accmat[g,"c1"] <- cor(EBVclas.h,AMat[,"g.value",g,2])                                  
+                        accmat[g,"ss1"] <- cor(AMat[,"EBV",g,2],AMat[,"g.value",g,2])
+                        geneticimp[g,"ss1"] <- mean(AMat[,"g.value",g,2])
+                        indeAh <- (nRef*gentemp)+1                                   
+                        Acurh <- Ath[indeAc:nrow(Ath) , indeAc:ncol(Ath)]
+                        Inbmat[g,"A1"] <- mean(diag(Acurh))
+                        Inbmat[g,"G1"] <- mean(AMat[,"inbreeding",g,2])
+                        
+#@@@ P3
+                        AMat[,"ID",g,3] <- pedigree[,"ID",g,3]
+                        AMat[,"Sire",g,3] <- pedigree[,"Sire",g,3]
+                        AMat[,"Dam",g,3] <- pedigree[,"Dam",g,3]
+                        Zuh <- matrix(0,nRef,totsnp)                                      
+                        for(i in 1:nRef)
+                        {
+                          I1 <- (i-1)*2+1
+                          I2 <- I1+1
+                          Zuh[i,] <- Tarpop[I1,,g,3] + Tarpop[I2,,g,3]
+                        }
+                        Zuhtot[,,g,2] <- Zuh
+                        Zqtl <-  matrix(0,nRef,totqtl)
+                        for(i in 1:nRef)
+                        {
+                          for(j in 1:totqtl)
+                          {
+                            if(Zuh[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+                            else if(Zuh[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+                          }
+                        }
+                        g.valueh <- apply (Zqtl,1,function(x) sum(x*eff.add))
+                        g.valueh <- round(g.valueh,2)
+                        AMat[,"g.value",g,3] <- g.valueh
+                        
+                  # Genotypic, phenotypic, and error Variance
+                        vgh <- var(g.valueh)
+                        Genetic.Variance[g,"ss2"] <- vgh                         
+                        vph <- vgh/h2
+                        veh <- vph-vgh
+                        veh <- round(veh,2)
+                        yh <- g.valueh + rnorm(length(g.valueh),0,sqrt(veh)) 
+                        yh <- round(yh,2)              
+                        AMat[,"phen",g,3] <- yh
+                  # pedigree and A relationship matrix for all generations
+                        Sireh <- c(pedigree[,"Sire",(1:g),3])
+                        Damh <-  c(pedigree[,"Dam",(1:g),3])
+                        Ath <- ACreator(Sireh,Damh) 
+                        Ath <- round(Ath,4)
+                        indethreegen <- (nRef*(g-Hgen))+1                      
+                        Acrh <- Ath[indethreegen:nrow(Ath),indethreegen:nrow(Ath)]
+                        #Arel[,,g,3] <- Ath[indeAh:nrow(Ath) , indeAh:ncol(Ath)]
+                  # Extracting the info of genotyped animals in each generation                                                    
+                        if(g==Hgen+1){GAG1 <- (nRef*(Hgen-1)) + GA.2             
+                        GAG2 <- (nRef*(Hgen-2)) + GA.2
+                        indGAtot <- c(GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}
+                        
+                        if(g>Hgen+1){ GAG1 <- (nRef*(Hgen-1)) + GA.2
+                        GAG2 <- (nRef*(Hgen-2)) + GA.2
+                        GAG3 <- GA.2                                           
+                        indGAtot <- c(GAG3,GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}                          
+                        
+                  # A22 & G22   
+                        A22 <- Acrh[indGAtot,indGAtot]                                                            
+                        A22rel.2[[gval]] <- A22                                                     
+                        if(g==Hgen+1){Zgen <- rbind(Zuhtot[GA.2,,(gentemp),2],Zuhtot[GA.2,,g,2])} 
+                        if(g>Hgen+1) {Zgen <- rbind(Zuhtot[GA.2,,(g-2),2],Zuhtot[GA.2,,gentemp,2],Zuhtot[GA.2,,g,2])}                      
+                        G22 <- GCreator(Zgen) 
+                  # A11 & A21 & A12
+                        A12 <- Acrh[indUGAtot,indGAtot]                      
+                        A21 <- Acrh[indGAtot,indUGAtot]               
+                  # Finding G22 & A22 parameters                                              
+                        A22scale <- A22                            
+                        A22.diag <- mean(diag(A22scale))        
+                        diag(A22scale) <- 0                         
+                        PA22 <- apply(A22scale,2,function(x) sum(x)/((length(x)-1)))                         
+                        A22.ofdiag <- mean(PA22)
+                        G22scale <- G22
+                        G22.diag <- mean(diag(G22scale))
+                        diag(G22scale) <- 0
+                        PG22 <- apply(G22scale,2,function(x) sum(x)/((length(x)-1)))
+                        G22.ofdiag <- mean(PG22)
+                        Alphadiag <- A22.diag - G22.diag
+                        Alphaofdiag <- A22.ofdiag - G22.ofdiag 
+                  # H       
+                        Hout <- HCreator(Acrh,A22,G22,A12,A21,Alphadiag,Alphaofdiag,indGAtot,indUGAtot)
+                        H <- Hout$H
+                        indehh <- (nRef*(Hgen-1))+1                            
+                        Hrel[,,g,2] <- H[indehh:nrow(H) , indehh:ncol(H)]        
+                        
+                  # Mix2 & G22 scaled & Gw  
+                        G22t <- (0.95*G22) + (0.05*A22)                                             
+                        G22temp <- G22t
+                        diag(G22temp) <- 0
+                        G22temp <- G22temp+Alphaofdiag
+                        diag(G22temp) <- 0                                     
+                        diag(G22temp) <- diag(G22t)+Alphadiag
+                        G22temp <- round(G22temp,4)
+                        #Mix2 <- (G22temp-A22)
+                        #Mix2 <- G22temp - (0.7*(A22))                         
+                        #Mix2 <- round(Mix2,4)
+                        G22rel.2[[gval]] <- G22temp             
+                  # Alpha
+                        #alphah <- veh/vgh
+                        alphah <- (1-h2)/h2
+                        alphah <- round(alphah)
+                        alphah <- drop(alphah)          
+                  # y
+                        # Animals in last generation don't have any record
+                        #ytothred <- matrix((AMat[,"phen",gendex:gentemp,2]),(nRef*(Hgen-1)),1)                         
+                        # Animals in last generation have records
+                        ytoth <- matrix((AMat[,"phen",(gendex:g),3]),(nRef*Hgen),1) 
+                  # Zh     
+                        # Animals in last generation have record
+                        Zh <- matrix(0,(nRef*Hgen),(nRef*Hgen))                    
+                        diag(Zh) <- 1
+                        # Animals in last generation don't have any record 
+                        #Zhred <- matrix(0,length(ytothred),(nRef*Hgen))
+                        #diag(Zhred) <- 1
+                  # ssBLUP using direct inverse of H                         
+                        Adeltatemp <- matrix(0,(nRef*Hgen),(nRef*Hgen))
+                        vah <- (solve(G22rel.2[[gval]])) - (solve(A22rel.2[[(gval)]])) 
+                        Adeltatemp[indGAtot,indGAtot] <- vah
+                        Hinv <- solve(Acrh) + Adeltatemp 
+                        ktemp <- Hinv*alphah
+                        ZZtemp <- crossprod(Zh)
+                        wtemp <- ZZtemp+ktemp
+                        Zytemp <- crossprod(Zh,ytoth)
+                        bhattemp <- solve(wtemp,Zytemp)
+                        bhattemp <- round(bhattemp,4)
+                        AMat[,"EBV",g,3] <- bhattemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]                          
+                        
+                        EBVclas.htemp <- BLUP(Zh,Acrh,ytoth,alphah)
+                        EBVclas.h <- EBVclas.htemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]
+                        EBVclas.h <- round(EBVclas.h,4)
+                  # Percent of heterozygosity            
+                        for(i in 1:nRef)
+                        {
+                          Sum=0
+                          for(j in 1:ncol(Zuh))
+                          {
+                            if(Zuh[i,j]!=1){Sum <- Sum+1}
+                          }
+                          AMat[i,"inbreeding",g,3] <- ((Sum/ncol(Zuh))/0.5)
+                        }                            
+                  # accmat                
+                        # separating accuracy for genotyped and ungenotyped animals in generation 5
+                        if(g>4){genAmat <- subset(AMat[,,g,3], AMat[,"genotype",g,3]==1)
+                        accgen <- cor(genAmat[,"EBV"],genAmat[,"g.value"])                          
+                        ungenAmat <- subset(AMat[,,g,3], AMat[,"genotype",g,3]==0)
+                        accungen <- cor(ungenAmat[,"EBV"],ungenAmat[,"g.value"])                         
+                        EBVclas.cur.h.gen <- EBVclas.h[GA.2]
+                        EBVclas.cur.h.ungen <- EBVclas.h[-GA.2]                         
+                        accmatcomp[g,"clasgen",2] <- cor(EBVclas.cur.h.gen , genAmat[,"g.value"])
+                        accmatcomp[g,"clasungen",2] <- cor(EBVclas.cur.h.ungen , ungenAmat[,"g.value"])                       
+                        accmatcomp[g,"ssgen",2] <- accgen                       
+                        accmatcomp[g,"ssungen",2] <- accungen 
+                        }# End of if
+                  # Accuracy , GI & Inbreding                                 
+                        accmat[g,"c2"] <- cor(EBVclas.h,AMat[,"g.value",g,3])                                  
+                        accmat[g,"ss2"] <- cor(AMat[,"EBV",g,3],AMat[,"g.value",g,3])
+                        geneticimp[g,"ss2"] <- mean(AMat[,"g.value",g,3])
+                        indeAh <- (nRef*gentemp)+1                                    
+                        Acurh <- Ath[indeAc:nrow(Ath) , indeAc:ncol(Ath)]
+                        Inbmat[g,"A2"] <- mean(diag(Acurh))
+                        Inbmat[g,"G2"] <- mean(AMat[,"inbreeding",g,3])
+
+#@@@ P4
+                  
+                        AMat[,"ID",g,4] <- pedigree[,"ID",g,4]
+                        AMat[,"Sire",g,4] <- pedigree[,"Sire",g,4]
+                        AMat[,"Dam",g,4] <- pedigree[,"Dam",g,4]
+                        Zuh <- matrix(0,nRef,totsnp)                                      
+                        for(i in 1:nRef)
+                        {
+                          I1 <- (i-1)*2+1
+                          I2 <- I1+1
+                          Zuh[i,] <- Tarpop[I1,,g,4] + Tarpop[I2,,g,4]
+                        }
+                        Zuhtot[,,g,3] <- Zuh
+                        Zqtl <-  matrix(0,nRef,totqtl)
+                        for(i in 1:nRef)
+                        {
+                          for(j in 1:totqtl)
+                          {
+                            if(Zuh[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+                            else if(Zuh[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+                          }
+                        }
+                        g.valueh <- apply (Zqtl,1,function(x) sum(x*eff.add))
+                        g.valueh <- round(g.valueh,2)
+                        AMat[,"g.value",g,4] <- g.valueh 
+                        
+                  # Genotypic, phenotypic, and error Variance
+                        vgh <- var(g.valueh)
+                        Genetic.Variance[g,"ss5"] <- vgh                         
+                        vph <- vgh/h2
+                        veh <- vph-vgh
+                        veh <- round(veh,2)
+                        yh <- g.valueh + rnorm(length(g.valueh),0,sqrt(veh)) 
+                        yh <- round(yh,2)              
+                        AMat[,"phen",g,4] <- yh
+                  # pedigree and A relationship matrix for all generations
+                        Sireh <- c(pedigree[,"Sire",(1:g),4])
+                        Damh <-  c(pedigree[,"Dam",(1:g),4])
+                        Ath <- ACreator(Sireh,Damh) 
+                        Ath <- round(Ath,4)
+                        indethreegen <- (nRef*(g-Hgen))+1                      
+                        Acrh <- Ath[indethreegen:nrow(Ath),indethreegen:nrow(Ath)]
+                        #Arel[,,g,4] <- Ath[indeAh:nrow(Ath) , indeAh:ncol(Ath)]
+                  # Extracting the info of genotyped animals in each generation                                                    
+                        if(g==Hgen+1){GAG1 <- (nRef*(Hgen-1)) + GA.3             
+                        GAG2 <- (nRef*(Hgen-2)) + GA.3
+                        indGAtot <- c(GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}
+                        
+                        if(g>Hgen+1){ GAG1 <- (nRef*(Hgen-1)) + GA.3
+                        GAG2 <- (nRef*(Hgen-2)) + GA.3
+                        GAG3 <- GA.3                                           
+                        indGAtot <- c(GAG3,GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}                          
+                        
+                  # A22 & G22   
+                        A22 <- Acrh[indGAtot,indGAtot]                                                            
+                        A22rel.3[[gval]] <- A22                                                     
+                        if(g==Hgen+1){Zgen <- rbind(Zuhtot[GA.3,,(gentemp),3],Zuhtot[GA.3,,g,3])} 
+                        if(g>Hgen+1) {Zgen <- rbind(Zuhtot[GA.3,,(g-2),3],Zuhtot[GA.3,,gentemp,3],Zuhtot[GA.3,,g,3])}                      
+                        G22 <- GCreator(Zgen)  
+                  # A11 & A21 & A12
+                        A12 <- Acrh[indUGAtot,indGAtot]                     
+                        A21 <- Acrh[indGAtot,indUGAtot]
+                  # Finding G22 & A22 parameters                                              
+                        A22scale <- A22                            
+                        A22.diag <- mean(diag(A22scale))        
+                        diag(A22scale) <- 0                         
+                        PA22 <- apply(A22scale,2,function(x) sum(x)/((length(x)-1)))                         
+                        A22.ofdiag <- mean(PA22)
+                        G22scale <- G22
+                        G22.diag <- mean(diag(G22scale))
+                        diag(G22scale) <- 0
+                        PG22 <- apply(G22scale,2,function(x) sum(x)/((length(x)-1)))
+                        G22.ofdiag <- mean(PG22)
+                        Alphadiag <- A22.diag - G22.diag
+                        Alphaofdiag <- A22.ofdiag - G22.ofdiag              
+                  # H       
+                        Hout <- HCreator(Acrh,A22,G22,A12,A21,Alphadiag,Alphaofdiag,indGAtot,indUGAtot)
+                        H <- Hout$H
+                        indehh <- (nRef*(Hgen-1))+1                           
+                        Hrel[,,g,3] <- H[indehh:nrow(H) , indehh:ncol(H)]        
+                        
+                  # Mix2 & G22 scaled & Gw  
+                        G22t <- (0.95*G22) + (0.05*A22)                                              
+                        G22temp <- G22t
+                        diag(G22temp) <- 0
+                        G22temp <- G22temp+Alphaofdiag
+                        diag(G22temp) <- 0                                     
+                        diag(G22temp) <- diag(G22t)+Alphadiag
+                        G22temp <- round(G22temp,4)
+                        #Mix2 <- (G22temp-A22)
+                        #Mix2 <- G22temp - (0.7*(A22))                         
+                        #Mix2 <- round(Mix2,4)
+                        G22rel.3[[gval]] <- G22temp             
+                  # Alpha
+                        #alphah <- veh/vgh
+                        alphah <- (1-h2)/h2
+                        alphah <- round(alphah)
+                        alphah <- drop(alphah)          
+                  # y
+                        # Animals in last generation don't have any record
+                        #ytothred <- matrix((AMat[,"phen",gendex:gentemp,4]),(nRef*(Hgen-1)),1)                         
+                        # Animals in last generation have records
+                        ytoth <- matrix((AMat[,"phen",(gendex:g),4]),(nRef*Hgen),1) 
+                  # Zh     
+                        # Animals in last generation have record
+                        Zh <- matrix(0,(nRef*Hgen),(nRef*Hgen))                    
+                        diag(Zh) <- 1
+                        # Animals in last generation don't have any record 
+                        #Zhred <- matrix(0,length(ytothred),(nRef*Hgen))
+                        #diag(Zhred) <- 1
+                  # ssBLUP using direct inverse of H 
+                        ### Normal                  
+                        Adeltatemp <- matrix(0,(nRef*Hgen),(nRef*Hgen))
+                        vah <- (solve(G22rel.3[[gval]])) - (solve(A22rel.3[[(gval)]])) 
+                        Adeltatemp[indGAtot,indGAtot] <- vah
+                        Hinv <- solve(Acrh) + Adeltatemp 
+                        ktemp <- Hinv*alphah
+                        ZZtemp <- crossprod(Zh)
+                        wtemp <- ZZtemp+ktemp
+                        Zytemp <- crossprod(Zh,ytoth)
+                        bhattemp <- solve(wtemp,Zytemp)
+                        bhattemp <- round(bhattemp,4)
+                        AMat[,"EBV",g,4] <- bhattemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]                          
+                        
+                        EBVclas.htemp <- BLUP(Zh,Acrh,ytoth,alphah)
+                        EBVclas.h <- EBVclas.htemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]
+                        EBVclas.h <- round(EBVclas.h,4)                
+                  # Percent of heterozygosity            
+                        for(i in 1:nRef)
+                        {
+                          Sum=0
+                          for(j in 1:ncol(Zuh))
+                          {
+                            if(Zuh[i,j]!=1){Sum <- Sum+1}
+                          }
+                          AMat[i,"inbreeding",g,4] <- ((Sum/ncol(Zuh))/0.5)
+                        }                            
+                  # accmat                
+                        # separating accuracy for genotyped and ungenotyped animals in generation 5
+                        if(g>4){genAmat <- subset(AMat[,,g,4], AMat[,"genotype",g,4]==1)
+                        accgen <- cor(genAmat[,"EBV"],genAmat[,"g.value"])                          
+                        ungenAmat <- subset(AMat[,,g,4], AMat[,"genotype",g,4]==0)
+                        accungen <- cor(ungenAmat[,"EBV"],ungenAmat[,"g.value"])                         
+                        EBVclas.cur.h.gen <- EBVclas.h[GA.3]
+                        EBVclas.cur.h.ungen <- EBVclas.h[-GA.3]                         
+                        accmatcomp[g,"clasgen",3] <- cor(EBVclas.cur.h.gen , genAmat[,"g.value"])
+                        accmatcomp[g,"clasungen",3] <- cor(EBVclas.cur.h.ungen , ungenAmat[,"g.value"])                       
+                        accmatcomp[g,"ssgen",3] <- accgen                       
+                        accmatcomp[g,"ssungen",3] <- accungen 
+                        }# End of if
+                  # Accuracy , GI & Inbreding                                 
+                        accmat[g,"c5"] <- cor(EBVclas.h,AMat[,"g.value",g,4])                                  
+                        accmat[g,"ss5"] <- cor(AMat[,"EBV",g,4],AMat[,"g.value",g,4])
+                        geneticimp[g,"ss5"] <- mean(AMat[,"g.value",g,4])
+                        indeAh <- (nRef*gentemp)+1                                    
+                        Acurh <- Ath[indeAc:nrow(Ath) , indeAc:ncol(Ath)]
+                        Inbmat[g,"A5"] <- mean(diag(Acurh))
+                        Inbmat[g,"G5"] <- mean(AMat[,"inbreeding",g,4])
+                        
+#@@@ P5
+                        AMat[,"ID",g,5] <- pedigree[,"ID",g,5]
+                        AMat[,"Sire",g,5] <- pedigree[,"Sire",g,5]
+                        AMat[,"Dam",g,5] <- pedigree[,"Dam",g,5]
+                        Zuh <- matrix(0,nRef,totsnp)                                      
+                        for(i in 1:nRef)
+                        {
+                          I1 <- (i-1)*2+1
+                          I2 <- I1+1
+                          Zuh[i,] <- Tarpop[I1,,g,5] + Tarpop[I2,,g,5]
+                        }
+                        Zuhtot[,,g,4] <- Zuh
+                        Zqtl <-  matrix(0,nRef,totqtl)
+                        for(i in 1:nRef)
+                        {
+                          for(j in 1:totqtl)
+                          {
+                            if(Zuh[i,(qtl.ids[j])]==2){Zqtl[i,j] <- 2}                             
+                            else if(Zuh[i,(qtl.ids[j])]==1){Zqtl[i,j] <- 1}
+                          }
+                        }
+                        g.valueh <- apply (Zqtl,1,function(x) sum(x*eff.add))
+                        g.valueh <- round(g.valueh,2)
+                        AMat[,"g.value",g,5] <- g.valueh
+                        
+                  # Genotypic, phenotypic, and error Variance
+                        vgh <- var(g.valueh)
+                        Genetic.Variance[g,"ss5e"] <- vgh                         
+                        vph <- vgh/h2
+                        veh <- vph-vgh
+                        veh <- round(veh,2)
+                        yh <- g.valueh + rnorm(length(g.valueh),0,sqrt(veh)) 
+                        yh <- round(yh,2)              
+                        AMat[,"phen",g,5] <- yh
+                  # pedigree and A relationship matrix for all generations
+                        Sireh <- c(pedigree[,"Sire",(1:g),5])
+                        Damh <-  c(pedigree[,"Dam",(1:g),5])
+                        Ath <- ACreator(Sireh,Damh) 
+                        Ath <- round(Ath,4)
+                        indethreegen <- (nRef*(g-Hgen))+1                      
+                        Acrh <- Ath[indethreegen:nrow(Ath),indethreegen:nrow(Ath)]
+                        #Arel[,,g,5] <- Ath[indeAh:nrow(Ath) , indeAh:ncol(Ath)]                         
+                  # Extracting the info of genotyped animals in each generation                                                    
+                        if(g==Hgen+1){GAG1 <- (nRef*(Hgen-1)) + GA.3             
+                        GAG2 <- (nRef*(Hgen-2)) + GA.3
+                        indGAtot <- c(GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}
+                        
+                        if(g>Hgen+1){ GAG1 <- (nRef*(Hgen-1)) + GA.3
+                        GAG2 <- (nRef*(Hgen-2)) + GA.3
+                        GAG3 <- GA.3                                           
+                        indGAtot <- c(GAG3,GAG2,GAG1)
+                        indGAtot <- sort(indGAtot)
+                        indUGAtemp <- c(1:(nRef*3))                   
+                        indUGAtot <- indUGAtemp[-indGAtot]}                          
+                        
+                  # A22 & G22   
+                        A22 <- Acrh[indGAtot,indGAtot]                                                            
+                        A22rel.4[[gval]] <- A22                                                   
+                        if(g==Hgen+1){Zgen <- rbind(Zuhtot[GA.3,,(gentemp),4],Zuhtot[GA.3,,g,4])} 
+                        if(g>Hgen+1) {Zgen <- rbind(Zuhtot[GA.3,,(g-2),4],Zuhtot[GA.3,,gentemp,4],Zuhtot[GA.3,,g,4])}                      
+                        G22 <- GCreator(Zgen)  
+                  # A11 & A21 & A12
+                        A12 <- Acrh[indUGAtot,indGAtot]                      
+                        A21 <- Acrh[indGAtot,indUGAtot]
+                  # Finding G22 & A22 parameters                                              
+                        A22scale <- A22                            
+                        A22.diag <- mean(diag(A22scale))        
+                        diag(A22scale) <- 0                         
+                        PA22 <- apply(A22scale,2,function(x) sum(x)/((length(x)-1)))                         
+                        A22.ofdiag <- mean(PA22)
+                        G22scale <- G22
+                        G22.diag <- mean(diag(G22scale))
+                        diag(G22scale) <- 0
+                        PG22 <- apply(G22scale,2,function(x) sum(x)/((length(x)-1)))
+                        G22.ofdiag <- mean(PG22)
+                        Alphadiag <- A22.diag - G22.diag
+                        Alphaofdiag <- A22.ofdiag - G22.ofdiag              
+                  # H       
+                        Hout <- HCreator(Acrh,A22,G22,A12,A21,Alphadiag,Alphaofdiag,indGAtot,indUGAtot)
+                        H <- Hout$H
+                        indehh <- (nRef*(Hgen-1))+1                            
+                        Hrel[,,g,4] <- H[indehh:nrow(H) , indehh:ncol(H)]        
+                        
+                  # Mix2 & G22 scaled & Gw  
+                        G22t <- (0.95*G22) + (0.05*A22)                                              
+                        G22temp <- G22t
+                        diag(G22temp) <- 0
+                        G22temp <- G22temp+Alphaofdiag
+                        diag(G22temp) <- 0                                     
+                        diag(G22temp) <- diag(G22t)+Alphadiag
+                        G22temp <- round(G22temp,4)
+                        #Mix2 <- (G22temp-A22)
+                        #Mix2 <- G22temp - (0.7*(A22))                         
+                        #Mix2 <- round(Mix2,4)
+                        G22rel.4[[gval]] <- G22temp             
+                  # Alpha
+                        #alphah <- veh/vgh
+                        alphah <- (1-h2)/h2
+                        alphah <- round(alphah)
+                        alphah <- drop(alphah)          
+                  # y
+                        # Animals in last generation don't have any record
+                        ytothred <- matrix((AMat[,"phen",gendex:gentemp,5]),(nRef*(Hgen-1)),1)                         
+                        # Animals in last generation have records
+                        ytoth <- matrix((AMat[,"phen",(gendex:g),5]),(nRef*Hgen),1) 
+                  # Zh     
+                        # Animals in last generation have record
+                        Zh <- matrix(0,(nRef*Hgen),(nRef*Hgen))                    
+                        diag(Zh) <- 1
+                        # Animals in last generation don't have any record 
+                        Zhred <- matrix(0,length(ytothred),(nRef*Hgen))
+                        diag(Zhred) <- 1
+                  # ssBLUP using direct inverse of H 
+                        ### Normal                  
+                        Adeltatemp <- matrix(0,(nRef*Hgen),(nRef*Hgen))
+                        vah <- (solve(G22rel.4[[gval]])) - (solve(A22rel.4[[(gval)]])) 
+                        Adeltatemp[indGAtot,indGAtot] <- vah
+                        Hinv <- solve(Acrh) + Adeltatemp 
+                        ktemp <- Hinv*alphah
+                        ZZtemp <- crossprod(Zhred)
+                        wtemp <- ZZtemp+ktemp
+                        Zytemp <- crossprod(Zhred,ytothred)
+                        bhattemp <- solve(wtemp,Zytemp)
+                        bhattemp <- round(bhattemp,4)
+                        AMat[,"EBV",g,5] <- bhattemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]                          
+                        
+                        EBVclas.htemp <- BLUP(Zh,Acrh,ytoth,alphah)
+                        EBVclas.h <- EBVclas.htemp[((nRef*(Hgen-1))+1):(nRef*Hgen)]
+                        EBVclas.h <- round(EBVclas.h,4)
+                  # Percent of heterozygosity            
+                        for(i in 1:nRef)
+                        {
+                          Sum=0
+                          for(j in 1:ncol(Zuh))
+                          {
+                            if(Zuh[i,j]!=1){Sum <- Sum+1}
+                          }
+                          AMat[i,"inbreeding",g,5] <- ((Sum/ncol(Zuh))/0.5)
+                        }                            
+                  # accmat                
+                        # separating accuracy for genotyped and ungenotyped animals in generation 5
+                        if(g>4){genAmat <- subset(AMat[,,g,5], AMat[,"genotype",g,5]==1)
+                        accgen <- cor(genAmat[,"EBV"],genAmat[,"g.value"])                          
+                        ungenAmat <- subset(AMat[,,g,5], AMat[,"genotype",g,5]==0)
+                        accungen <- cor(ungenAmat[,"EBV"],ungenAmat[,"g.value"])                         
+                        EBVclas.cur.h.gen <- EBVclas.h[GA.3]
+                        EBVclas.cur.h.ungen <- EBVclas.h[-GA.3]                         
+                        accmatcomp[g,"clasgen",4] <- cor(EBVclas.cur.h.gen , genAmat[,"g.value"])
+                        accmatcomp[g,"clasungen",4] <- cor(EBVclas.cur.h.ungen , ungenAmat[,"g.value"])                       
+                        accmatcomp[g,"ssgen",4] <- accgen                       
+                        accmatcomp[g,"ssungen",4] <- accungen 
+                        }# End of if
+                  # Accuracy , GI & Inbreding                                 
+                        accmat[g,"c5e"] <- cor(EBVclas.h,AMat[,"g.value",g,5])                                  
+                        accmat[g,"ss5e"] <- cor(AMat[,"EBV",g,5],AMat[,"g.value",g,5])
+                        geneticimp[g,"ss5e"] <- mean(AMat[,"g.value",g,5])
+                        indeAh <- (nRef*gentemp)+1                                   
+                        Acurh <- Ath[indeAc:nrow(Ath) , indeAc:ncol(Ath)]
+                        Inbmat[g,"A5e"] <- mean(diag(Acurh))
+                        Inbmat[g,"G5e"] <- mean(AMat[,"inbreeding",g,5])
+
+               cat("Gen:", g , "\n")                 
+            } # End for each generatio
+                accmatcomp <- round(accmatcomp,2)                                
+                accmat <- round(accmat,2)         
+                geneticimp <- round(geneticimp,2) 
+                Inbmat <- Inbmat-1
+                Inbmat <- round(Inbmat,2)
+                Genetic.Variance <- round(Genetic.Variance,2)
+                
+                # Printing results
+                write.table(accmat, "accmat.txt", sep="\t")
+                write.table(accmatcomp, "accmatcomp.txt", sep="\t")             
+                write.table(geneticimp, "geneticimp.txt", sep="\t")
+                write.table(Inbmat, "Inbmat.txt", sep="\t")
+                write.table(Genetic.Variance, "Genetic.Variance.txt", sep="\t")              
+                write.csv(AMat[,,,1], file = "AMat 1.Csv", quote = TRUE, eol = "\n", row.names = TRUE)
+                write.csv(AMat[,,,2], file = "AMat 2.Csv", quote = TRUE, eol = "\n", row.names = TRUE)
+                write.csv(AMat[,,,3], file = "AMat 3.Csv", quote = TRUE, eol = "\n", row.names = TRUE)
+                write.csv(AMat[,,,4], file = "AMat 4.Csv", quote = TRUE, eol = "\n", row.names = TRUE)
+                write.csv(AMat[,,,5], file = "AMat 5.Csv", quote = TRUE, eol = "\n", row.names = TRUE)
+                #write.csv(Tarpop, file = "Tarpop.Csv", quote = TRUE, eol = "\n", row.names = TRUE)                                  
+                
+                ############ Calling results
+                valout <- list(Tarpop=Tarpop , accmat=accmat , accmatcomp=accmatcomp , AMat=AMat , Inbmat=Inbmat , 
+                               geneticimp=geneticimp , LDs=LDs , Genetic.Variance=Genetic.Variance)
+                
+                return(valout)         
+} # End of Valpop
+#################################################################################################################
+################################################# Blup ##########################################################
+BLUP <- function(Z,rel,y,alpha)
+{
+  #AInv <- chol2inv(chol(rel))
+  AInv <- solve(rel)
+  k <- AInv*alpha
+  ZZ <- crossprod(Z)
+  w <- ZZ+k
+  Zy <- crossprod(Z,y)
+  bhat <- solve(w,Zy)
+  bhat <- round(bhat,4)             
+  return(bhat)
+}
+#####################################################################################################################
+################################################# A creator  ########################################################
+ACreator <- function(Sire,Dam)
+{
+  N <- length(Sire)
+  A <- matrix(0, nrow=N, ncol=N)
+  Sire <- (Sire == 0)*(N) + Sire
+  Dam <- (Dam == 0)*N + Dam
+  for(i in 1:N)
+  {
+    A[i,i] <- 1 + (A[Sire[i], Dam[i]]/2 )
+    for(j in (i+1):N)
+    {if (j > N) break
+      A[i,j] <- ( A[i, Sire[j]] + A[i,Dam[j]] )/2
+      A[j,i] <- A[i,j]
+    }
+  }
+  return(A[1:N,1:N])
+}
+#######################################################################################################################
+######################################################## G creator ####################################################
+GCreator <- function(ZM)
+{
+  for(v in 1:ncol(ZM))
+      {frq <-(sum(ZM[,v])/(2*nrow(ZM)))
+      if(frq <=0.05 | frq >=0.95 ){ZM[,v]<- NA}}
+      snpremove <- colSums(is.na(ZM)) != nrow(ZM)
+      ZM <- ZM[,snpremove]                               # Omitting Markers with MAF < 0.05
+  p <- apply (ZM,2,function(x) sum(x)/(length(x)*2)) 
+  pt2 <- 2*p
+  M <- t(apply(ZM,1,function(x) x-pt2))
+  k <- 2*(sum(p*(1-p)))
+  ZZM <- tcrossprod(M)
+  GRM <- ZZM/k
+  GRM <- round(GRM,4)
+  diag(GRM) <- diag(GRM) + 0.01
+  return(GRM)
+}
+#######################################################################################################################
+######################################################## H creator ####################################################
+HCreator <- function(A,A22,G22,A12,A21,Alphadiag,Alphaofdiag,indGAtot,indUGAtot)
+{
+  Mix1 <- A12 %*% (solve(A22))
+  #Mix1 <- A12 %*% (chol2inv(chol(A22)))
+  Mix1 <- round(Mix1,4)
+  G22t <- (0.95*G22) + (0.05*A22)                               # To avoid singularity                      
+  G22temp <- G22t
+  diag(G22temp) <- 0
+  G22temp <- G22temp+Alphaofdiag
+  diag(G22temp) <- 0                                            
+  diag(G22temp) <- diag(G22t)+Alphadiag
+  G22temp <- round(G22temp,4)
+  Mix2 <- (G22temp-A22)
+  #Mix2 <- G22temp - (0.7*(A22))                        # Tsutura formula (Accuracy decreased in our case!)
+  Mix2 <- round(Mix2,4)                 
+  Mix3 <- (solve(A22)) %*% A21
+  #Mix3 <- (chol2inv(chol(A22))) %*% A21
+  Mix3 <- round(Mix3,4)
+  miniIden <- matrix(0,length(indGAtot),length(indGAtot))
+  diag(miniIden) <- 1 
+  # 1            
+  vv <- matrix(0,nrow(A),ncol(A))                               
+  vv[indGAtot,indUGAtot] <- Mix3
+  vv[indGAtot,indGAtot] <- miniIden
+  # 2            
+  ss <- matrix(0,length(indGAtot),nrow(A))                                
+  ss[,indGAtot] <- miniIden
+  # 3                           
+  qq <- matrix(0,nrow(A),length(indGAtot))                                                                  
+  qq[indGAtot,] <- miniIden
+  # 4         
+  nn <- matrix(0,nrow(A),ncol(A)) 
+  nn[indUGAtot,indGAtot] <- Mix1
+  nn[indGAtot,indGAtot] <- miniIden   
+  
+  Adelta <- (nn %*% (qq %*% (Mix2 %*% (ss %*% vv))))
+  Adelta <- round(Adelta,4)
+  H <- A + Adelta
+  H <- round(H,4)                  
+  Hout <- list(H=H , G22temp=G22temp)               
+  return(Hout)                        
+}
+################################################################################################################
+################################################ Mate Selection ################################################
+mateselN <- function(selectedmales,selectedfemales,totsnp,generation,Lines,nRef,Arel,chrn,StpinMorgan)
+{
+  N <- (nrow(selectedmales) + nrow(selectedfemales)) 
+  SireNum <- nrow(selectedmales)    
+  DamNum <- N-SireNum  
+  sexratio <- DamNum/SireNum 
+  malesID <- selectedmales[,1]
+  femalesID <- selectedfemales[,1]
+  mID <- malesID
+  fID <- femalesID
+  valpop <- matrix(0,nRef*2,totsnp)
+  ped <- matrix(0,nRef,3)
+  colnames(ped) <- c("ID","Sire","Dam")
+  MAmat <- matrix(0,SireNum,DamNum)
+  rownames(MAmat) <- malesID
+  colnames(MAmat) <- femalesID
+  for(i in 1:nrow(MAmat))                   # MAmat with the corresponding elements in A, G or H
+  {                                            # Sires in rows
+    for(j in 1:ncol(MAmat))
+    {                                            # Dams in columns
+      A <- selectedmales[i,1]
+      B <- selectedfemales[j,1]
+      MAmat[i,j] <- (Arel[A,B])
+      MAmat[i,j] <- MAmat[i,j]+(runif(1)/100)
+    }
+  }# 
+  
+  MM <- matrix(0,DamNum,2)
+  colnames(MM) <- c("male","female")
+  
+  for(i in 1:SireNum) # for all males
+  {
+    relvec <- MAmat[i,] # i index
+    for(j in 1:sexratio) # for total number of matings per male = DamNum/SireNum
+    {
+      maletemind <- ((i-1)*sexratio) + j     
+      MM[maletemind,"male"] <- mID[i]                  
+      yindex <- which(relvec[]==min(relvec[]),arr.ind=TRUE) 
+      MM[maletemind,"female"] <- fID[yindex] 
+      relvec <- relvec[-yindex]
+      if(i*j < N-SireNum){MAmat <- MAmat[,-yindex]}
+      fID <- fID[-yindex]
+    } # end of matings for each male 
+  } # end for all males
+  
+  Sirevectemp <- MM[,1]
+  Sirevec <- rep(Sirevectemp,each=10) 
+  Damvectemp <- MM[,2]
+  Damvec <- rep(Damvectemp,each=10)  
+  
+  for (indiv in 1:nRef)
+  {
+    gameteIndex1 <- (indiv-1)*2+1
+    gameteIndex2 <- gameteIndex1+1
+    ## Sires gamete
+    SireINDEX <- Sirevec[indiv]                        
+    SireGamet1 <- (((Sirevec[indiv])-1)*2)+1                
+    SireGamet2 <- (SireGamet1)+1                              
+    valpop[gameteIndex1,] <- Recombin(Lines[SireGamet1,],
+                                      Lines[SireGamet2,],
+                                      chrn,
+                                      totsnp,
+                                      StpinMorgan)
+    ## Dams gamete
+    DamINDEX <- Damvec[indiv]                           
+    DamsGamet1 <- (((Damvec[indiv])-1)*2)+1                 
+    DamsGamet2 <- (DamsGamet1)+1                              
+    valpop[gameteIndex2, ] <- Recombin(Lines[DamsGamet1,],
+                                       Lines[DamsGamet2,],
+                                       chrn,
+                                       totsnp,
+                                       StpinMorgan)
+    
+    ped[,"ID"] <- (1+(nRef*(generation-1))):(nRef*generation)
+    ped[indiv,"Sire"] <- (Sirevec[indiv]+((generation-2)*nRef))
+    ped[indiv,"Dam"] <- (Damvec[indiv]+((generation-2)*nRef))
+  } 
+  
+  matout <- list(valpop=valpop , ped=ped)
+  return(matout)
+} # End of function
+################################################################################################################
+################################################ Random Mating #################################################
+RandommatN <- function(selectedmales,selectedfemales,totsnp,generation,Lines,nRef,chrn,StpinMorgan)
+{
+  N <- (nrow(selectedmales) + nrow(selectedfemales)) 
+  SireNum <- nrow(selectedmales)    
+  DamNum <- N-SireNum  
+  Sirevectemp <- selectedmales[,1]
+  Sirevectemp.2 <- rep(Sirevectemp,each=100)
+  Damvectemp <- selectedfemales[,1]
+  Damvectemp.2 <- rep(Damvectemp,each=10)
+  Sirevec <- sample(Sirevectemp.2,nRef,replace=FALSE) 
+  Damvec <- sample(Damvectemp.2,nRef,replace=FALSE)          
+  valpop <- matrix(0,nRef*2,totsnp)
+  ped <- matrix(0,nRef,3)
+  colnames(ped) <- c("ID","Sire","Dam")
+  for (indiv in 1:nRef)
+      {
+        gameteIndex1 <- (indiv-1)*2+1
+        gameteIndex2 <- gameteIndex1+1
+        ## Sires gamete
+        SireINDEX <- Sirevec[indiv]                        
+        SireGamet1 <- (((Sirevec[indiv])-1)*2)+1                 
+        SireGamet2 <- (SireGamet1)+1                  
+        valpop[gameteIndex1,] <- Recombin(Lines[SireGamet1,],
+                                          Lines[SireGamet2,],
+                                          chrn,
+                                          totsnp,
+                                          StpinMorgan)
+        ## Dams gamete
+        DamINDEX <- Damvec[indiv]                           
+        DamsGamet1 <- (((Damvec[indiv])-1)*2)+1                   
+        DamsGamet2 <- (DamsGamet1)+1                   
+        valpop[gameteIndex2, ] <- Recombin(Lines[DamsGamet1,],
+                                           Lines[DamsGamet2,],
+                                           chrn,
+                                           totsnp,
+                                           StpinMorgan)
+        
+        ped[,"ID"] <- (1+(nRef*(generation-1))):(nRef*generation)
+        ped[indiv,"Sire"] <- (Sirevec[indiv]+((generation-2)*nRef))
+        ped[indiv,"Dam"] <- (Damvec[indiv]+((generation-2)*nRef))
+      } 
+  
+  matout <- list(valpop=valpop , ped=ped)
+  return(matout)
+} # End of function
+##########################################################################################################################
+##########################################################################################################################
