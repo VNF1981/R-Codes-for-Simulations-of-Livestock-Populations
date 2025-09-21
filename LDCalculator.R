@@ -1,6 +1,6 @@
 ########################################
 ####################
-# Function for calculating LD
+# Function for calculating Linkage disequilibrium (LD) 
 
 # Input parameters: chrn, snpchr, pop, Basenum
 # chrn: Number of chromosomes 
@@ -30,4 +30,5 @@ LDCalculator <- function(chrn,snpchr,pop,Basenum)
   LD <- mean(ldsVector , na.rm=TRUE)
   return(LD)
 }
+
 ########################################
