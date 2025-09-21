@@ -1,6 +1,6 @@
 ########################################
 ####################
-# Function for making GRM using VanRAden method
+# Function for making Genomic Relationship Matrix using VanRaden method
 
 # Input parameters: Z matrix 
 # Z: Matrix of genotypes(n*m), n = number of individuals, m = number of markers.                  
@@ -22,4 +22,5 @@ GCreator <- function(Z)
         GRM <- round(GRM,4)
         return(GRM)
      }
+
 ########################################
